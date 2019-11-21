@@ -316,7 +316,13 @@ impl KrateDetails {
                     lf
                 }
             }),
-            license_file: pkg.license_file,
+            license_file: {
+                if let Some(file) = &pkg.license_file {
+                    println!("!!!!!! {:?}", file);
+                }
+
+                pkg.license_file
+            },
             description: pkg.description,
             manifest_path: pkg.manifest_path,
             deps: {

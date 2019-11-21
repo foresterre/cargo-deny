@@ -11,6 +11,7 @@ use std::{
     path::{Path, PathBuf},
     sync::Arc,
 };
+use serde::export::Formatter;
 
 const LICENSE_CACHE: &[u8] = include_bytes!("../spdx_cache.bin.zstd");
 
@@ -304,8 +305,12 @@ fn get_file_source(path: PathBuf) -> PackFile {
     // Normalize on plain newlines to handle terrible Windows conventions
     let content = {
         let file = match std::fs::File::open(&path) {
-            Ok(f) => f,
+            Ok(f) => {
+                dbg!("ok path");
+                f
+            },
             Err(e) => {
+                dbg!("err path");
                 return PackFile {
                     path,
                     data: PackFileData::Bad(e),
@@ -351,6 +356,15 @@ enum PackFileData {
     Bad(std::io::Error),
 }
 
+impl std::fmt::Debug for PackFileData {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        match self {
+            PackFileData::Good(file) => f.write_str(&file.content),
+            PackFileData::Bad(_) => f.write_str("Couldnt find content of PackFile"),
+        }
+    }
+}
+
 struct PackFile {
     path: PathBuf,
     data: PackFileData,
@@ -365,6 +379,8 @@ impl LicensePack {
     fn read(krate: &KrateDetails) -> Self {
         let root_path = krate.manifest_path.parent().unwrap();
 
+        // finds the license files starting with LICENSE in the crate root
+        // the crate root is of the current crate (so not necessarily a workspace root)
         let mut lic_paths = match find_license_files(root_path) {
             Ok(paths) => paths,
             Err(e) => {
@@ -377,13 +393,40 @@ impl LicensePack {
 
         // Add the explicitly specified license if it wasn't
         // already found in the root directory
-        if let Some(ref lf) = krate.license_file {
-            if lic_paths.iter().find(|l| l.ends_with(lf)).is_none() {
-                lic_paths.push(lf.clone());
+
+
+
+        if let Some(ref lf) = krate.license_file { // TODO: the license file can be relative; then this panics
+//            lf.join()
+//            let lf = if lf.starts_with(&krate.manifest_path) {
+//                krate.manifest_path.join(lf)
+//            }
+//            else {
+//                lf.clone()
+//            };
+
+            dbg!(&lf);
+            // here the license was not found in the root directory
+            if lic_paths.iter().find(|l| l.ends_with(&lf)).is_none() {
+                let full_path = krate.manifest_path.parent().unwrap().join(lf);
+
+                lic_paths.push(full_path);
+//                lic_paths.push(lf.clone());
+                dbg!("path taken: if");
+            } else {
+                dbg!("path taken: else");
             }
         }
 
-        let mut license_files: Vec<_> = lic_paths.into_iter().map(get_file_source).collect();
+        let mut license_files: Vec<_> = lic_paths.into_iter().inspect(|pathbuf| {
+            println!("PATHBUF: {:?}", &pathbuf);
+            })
+            .map(get_file_source)
+            .inspect(|packfile| {
+                println!("PACKFILE path: {:?}",  &packfile.path);
+                println!("PACKFILE path: {:?}",  &packfile.data);
+            })
+            .collect();
 
         license_files.sort_by(|a, b| a.path.cmp(&b.path));
 
@@ -449,11 +492,15 @@ impl LicensePack {
 
         let root_path = krate.manifest_path.parent().unwrap();
 
+
         for lic_contents in &self.license_files {
+            dbg!(root_path);
+            dbg!(&lic_contents.path);
+
             write!(
                 synth_toml,
                 "    {{ path = \"{}\", ",
-                lic_contents.path.strip_prefix(root_path).unwrap().display(),
+                lic_contents.path.strip_prefix(root_path).expect("No 'license-file' found in this crate.").display(),
             )
             .unwrap();
 
